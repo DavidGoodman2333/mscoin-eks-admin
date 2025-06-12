@@ -1,0 +1,51 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: mscoin-services
+  namespace: flux-system
+spec:
+  provider: aws
+  serviceAccountName: image-reflector-controller
+  image: 987595490691.dkr.ecr.ap-east-1.amazonaws.com/solana_event_parser
+  interval: 1m
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: mscoin-services-policy
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: mscoin-services
+    namespace: flux-system
+  filterTags:
+    pattern: '^[\d]*.[\d]*.[\d]*$'
+  policy:
+    semver:
+      range: ">=0.0.0"
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: mscoin-services-image-automation
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: ave-k8s-data-apps
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcd_bot@users.noreply.github.com
+        name: fluxcd-bot
+      messageTemplate: '{{range .Changed.Changes}}{{print .OldValue}} -> {{println .NewValue}}{{end}}'
+    push:
+      branch: main
+  update:
+    path: ./prod/ap-east-1/deployments/streams
+    strategy: Setters

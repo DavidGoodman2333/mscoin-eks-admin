@@ -1,0 +1,13 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: mscoin-services
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  url: ssh://git@github.com/Davidgoodman2333/mscoin-services.git
+  ref:
+    branch: main
+  secretRef:
+    name: git-secret
+
