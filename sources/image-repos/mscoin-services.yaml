@@ -6,7 +6,7 @@ metadata:
 spec:
   provider: aws
   serviceAccountName: image-reflector-controller
-  image: 987595490691.dkr.ecr.ap-east-1.amazonaws.com/solana_event_parser
+  image: 457591490960.dkr.ecr.ap-east-1.amazonaws.com/solana_event_parser
   interval: 1m
 ---
 apiVersion: image.toolkit.fluxcd.io/v1beta2
@@ -46,6 +46,3 @@ spec:
       messageTemplate: '{{range .Changed.Changes}}{{print .OldValue}} -> {{println .NewValue}}{{end}}'
     push:
       branch: main
-  update:
-    path: ./prod/ap-east-1/deployments/streams
-    strategy: Setters
