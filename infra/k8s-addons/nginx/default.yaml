@@ -1,0 +1,84 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nginx
+  namespace: kube-system
+spec:
+  interval: 5m0s
+  timeout: 1m0s
+  chart:
+    spec:
+      chart: ingress-nginx
+      version: "4.10.1"
+      interval: 5m
+      sourceRef:
+        kind: HelmRepository
+        name: ingress-nginx
+  values:
+    tcp:
+      "9030": "starrocks/starrocks-shared-data-cluster-fe-service:9030"
+    controller:
+      replicaCount: 6
+      service:
+        externalTrafficPolicy: Local
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+          service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+          service.beta.kubernetes.io/aws-load-balancer-type: "external"
+          service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
+          service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+      metrics:
+        prometheusRule:
+          enabled: true
+          additionalLabels:
+            namespace: kube-system
+          rules:
+            - alert: NGINXTooMany500s
+              expr: 100 * ( sum( nginx_ingress_controller_requests{status=~"5.+", exported_namespace!="open-api-k8s-dev"} ) / sum(nginx_ingress_controller_requests{exported_namespace!="open-api-k8s-dev"}) ) > 5
+              for: 1m
+              labels:
+                severity: warning
+              annotations:
+                description: Too many 5XXs
+                summary: More than 5% of all requests returned 5XX
+            - alert: NGINXTooMany400s
+              expr: 100 * ( sum( nginx_ingress_controller_requests{status=~"4.+", exported_namespace!="open-api-k8s-dev"} ) / sum(nginx_ingress_controller_requests{exported_namespace!="open-api-k8s-dev"}) ) > 5
+              for: 1m
+              labels:
+                severity: warning
+              annotations:
+                description: Too many 4XXs
+                summary: More than 5% of all requests returned 4XX
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          additionalLabels:
+            release: prometheus-stack
+      resources:
+        requests:
+          cpu: 200m
+          memory: 200Mi
+        limits:
+          cpu: 400m
+          memory: 400Mi
+      nodeSelector:
+        nodegroup: "k8s-core"
+      autoscaling:
+        enabled: true
+        minReplicas: 8
+        maxReplicas: 20
+        targetCPUUtilizationPercentage: 75
+        targetMemoryUtilizationPercentage: 60
+        behavior:
+          scaleDown:
+            stabilizationWindowSeconds: 600
+            policies:
+              - type: Pods
+                value: 1
+                periodSeconds: 180
+          scaleUp:
+            stabilizationWindowSeconds: 600
+            policies:
+              - type: Pods
+                value: 2
+                periodSeconds: 60

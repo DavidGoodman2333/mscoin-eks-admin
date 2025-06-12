@@ -1,0 +1,80 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flink-kubernetes-operator
+  namespace: flink-on-k8s
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flink-kubernetes-operator
+  podMetricsEndpoints:
+    - port: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flink-deployments
+  namespace: flink-on-k8s
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      type: flink-native-kubernetes
+  podMetricsEndpoints:
+    - port: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flux-system
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/part-of: flux
+    app.kubernetes.io/component: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - flux-system
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - helm-controller
+          - source-controller
+          - kustomize-controller
+          - notification-controller
+          - image-automation-controller
+          - image-reflector-controller
+  podMetricsEndpoints:
+    - port: http-prom
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: data-apps-pod-monitor
+  namespace: data-apps
+spec:
+  namespaceSelector:
+    matchNames:
+      - data-apps
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - dev-solana-transaction
+          - v2-complete-data-normal-solana-transaction
+          - v3-complete-data-normal-solana-transaction
+          - complete-data-normal-bsc-transaction
+          - bsc-transaction
+          - data-quality-monitor
+          - data-quality-producer-monitor
+          - data-quality-record-monitor
+          - data-quality-account-portfolio-monitor
+  podMetricsEndpoints:
+    - port: metrics

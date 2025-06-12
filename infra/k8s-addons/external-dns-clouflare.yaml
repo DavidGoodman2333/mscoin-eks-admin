@@ -1,0 +1,38 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns-cloudflare
+  namespace: kube-system
+spec:
+  interval: 5m
+  timeout: 2m
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.15.0"
+      interval: 5m
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+  values:
+    serviceAccount:
+      create: false
+      name: tf-service-role-for-external-dns
+    provider:
+      name: cloudflare
+    domainFilters: ["mscoinsso.xyz", "mscoindata.org"]
+    resources:
+      requests:
+        cpu: 50m
+        memory: 100Mi
+      limits:
+        cpu: 100m
+        memory: 200Mi
+    env:
+      - name: CF_API_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: cloudflare-api-key
+            key: apiKey
+    nodeSelector:
+      nodegroup: "k8s-core"

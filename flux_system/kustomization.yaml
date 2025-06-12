@@ -1,0 +1,62 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- gotk-components.yaml
+- gotk-sync.yaml
+patches:
+  - patch: |
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: image-reflector-controller
+        annotations:
+          eks.amazonaws.com/role-arn: arn:aws:iam::457591490960:role/image-reflector-controller
+    target:
+      kind: ServiceAccount
+      name: image-reflector-controller
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: not-important
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                resources:
+                  limits:
+                    cpu: 200m
+                    memory: 200Mi   
+                  requests:
+                    cpu: 100m
+                    memory: 100Mi
+            nodeSelector: 
+                nodegroup: k8s-core
+    target:
+      kind: Deployment
+      name: "(source-controller|notification-controller|image-automation-controller)"
+      namespace: flux-system
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: not-important
+      spec:
+        template:
+          spec:
+            containers:
+              - name: manager
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 500Mi   
+                  requests:
+                    cpu: 200m
+                    memory: 300Mi
+            nodeSelector: 
+                nodegroup: k8s-core
+    target:
+      kind: Deployment
+      name: "(image-reflector-controller|kustomize-controller|helm-controller)"
+      namespace: flux-system

@@ -1,0 +1,544 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 1m
+  timeout: 5m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "58.6.0"
+      interval: 5m
+      sourceRef:
+        kind: HelmRepository
+        name: kube-prometheus-stack
+  values:
+    defaultRules:
+      rules:
+        etcd: false
+        kubeControllerManager: false
+        kubeApiserverAvailability: false
+        kubeApiserverBurnrate: false
+        kubeApiserverHistogram: false
+        kubeApiserverSlos: false
+        kubeSchedulerAlerting: false
+        kubeSchedulerRecording: false
+    additionalPrometheusRulesMap:
+      alerting-rules:
+        groups:
+          - name: starrocks-alerts
+            rules:
+              - alert: StarrocksFeClusterDown
+                expr: sum(up{container="fe", namespace="starrocks", job="starrocks-shared-data-cluster-fe-service"}) <= 3
+                for: 10m
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "starrocks fe cluster down"
+                  description: "starrocks fe cluster replicas less than 3 for 10m"
+              - alert: StarrocksCnClusterCpuUtilizationTooHigh
+                expr: (sum(rate(starrocks_be_cpu{mode="idle"}[5m])) by (job)) / (sum(rate(starrocks_be_cpu[5m])) by (job)) < 0.2
+                for: 5m
+                labels:
+                  severity: P1
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "starrocks cn cluster cpu usage too high"
+                  description: "starrocks cn cluster cpu utilization higher than 80% for 5m"
+              - alert: StarrocksFeClusterJVMUsageTooHigh
+                expr: sum(jvm_heap_size_bytes{container="fe", type="used", namespace="starrocks"} * 100) by (instance, job) / sum(jvm_heap_size_bytes{container="fe", type="max", namespace="starrocks"}) by (instance, job) > 70
+                for: 15m
+                labels:
+                  severity: P1
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "starrocks fe cluster jvm usage too high"
+                  description: "starrocks fe cluster jvm utilization higher than 70%"
+          - name: data-streaming-alerts
+            rules:
+              - alert: BackfillSolBlockNumberReceived
+                expr: sum(rate(kafka_topic_partition_current_offset{topic="sol_block_numbers"}[5m])) > 0
+                for: 1s
+                labels:
+                  severity: P1
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "sol_block_number topic received backfill block request"
+              - alert: SolanaBlockLatencyTooHigh
+                expr: avg(solana_streaming_block_lag) by (namespace, container) > 200
+                for: 10s
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "solana streaming block latency too high"
+                  description: "{{ $labels.container }} block latency is {{ $value | humanize }}"
+              - alert: SolanaL1SwapPersistLatencyTooHigh
+                expr: histogram_quantile(0.9, rate(swap_latest_persist_latency_seconds_histo_bucket[5m])) > 15
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "Solana P90 L1 swap info persist latency higher than 15s"
+                  description: "data quality monitor detect SWAP latency is {{ $value | humanize }}"
+              - alert: SolanaL1TransferPersistLatencyTooHigh
+                expr: histogram_quantile(0.9, rate(transfer_latest_persist_latency_seconds_histo_bucket[5m])) > 40
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "Solana P90 Solana L1 transfer info persist latency higher than 40s"
+                  description: "data quality monitor detect TRANSFER latency is {{ $value | humanize }}"
+              - alert: SolanaBalancePersistLatencyTooHigh
+                expr: histogram_quantile(0.9, rate(balance_latest_persist_latency_blocks_histo_bucket[5m])) * 0.4 > 7
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "Solana P90 balance info persist latency higher than 7s"
+                  description: "data quality monitor detect Solana BALANCE latency is {{ $value | humanize }} blocks"
+              - alert: BscL1SwapPersistLatencyTooHigh
+                expr: histogram_quantile(0.9, rate(bsc_swap_latest_persist_latency_seconds_histo_bucket[5m])) > 15
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "Bsc P90 L1 swap info persist latency higher than 15s"
+                  description: "data quality monitor detect SWAP latency is {{ $value | humanize }}"
+              - alert: BscL1TransferPersistLatencyTooHigh
+                expr: histogram_quantile(0.9, rate(bsc_transfer_latest_persist_latency_seconds_histo_bucket[5m])) > 15
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "Bsc P90 Solana L1 transfer info persist latency higher than 15s"
+                  description: "data quality monitor detect TRANSFER latency is {{ $value | humanize }}"
+              - alert: BscBalancePersistLatencyTooHigh
+                expr: histogram_quantile(0.9, rate(bsc_balance_latest_persist_latency_blocks_histo_bucket[5m])) > 10
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "Bsc P90 balance info persist latency higher than 10s"
+                  description: "data quality monitor detect Bsc BALANCE latency is {{ $value | humanize }} blocks"
+              - alert: BscStreamBlockLatencyTooHigh
+                expr: avg(bsc_streaming_block_lag) by (namespace, container) > 4
+                for: 10s
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  summary: "bsc streaming block latency too high"
+                  description: "{{ $labels.container }} block latency is {{ $value | humanize }}"
+          - name: resource-utilization-alerts
+            rules:
+              - alert: PodHighCPUUtilization
+                expr: round(100 * sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate) by (pod) / sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_limits) by (pod), 0.01) > 100
+                for: 5m
+                labels:
+                  severity: P2
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  description: "pod cpu utilization too high"
+                  summary: "Pod {{ $labels.pod }} CPU utilization reach {{ $value }}%"
+              - alert: PodHighMemoryUtilization
+                expr: round(100 * sum(container_memory_working_set_bytes{job="kubelet", metrics_path="/metrics/cadvisor", container!="", image!=""}) by (pod) / sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_limits) by (pod), 0.01) > 100
+                for: 5m
+                labels:
+                  severity: P2
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  description: "pod memory utilization too high"
+                  summary: "Pod {{ $labels.pod }} MEM utilization reach {{ $value }}%"
+                  namespace: "{{ $labels.namespace }}"
+              - alert: PersistentVolumeHighSpaceUtilization
+                expr: round(100 * (1 - sum(kubelet_volume_stats_available_bytes{job="kubelet", metrics_path="/metrics"}) by (persistentvolumeclaim) / sum(kubelet_volume_stats_capacity_bytes{job="kubelet", metrics_path="/metrics"}) by (persistentvolumeclaim)), 0.01) > 90
+                for: 5m
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.namespace }}"
+                annotations:
+                  description: "pod persistent volume space utilization too high"
+                  summary: "Volume {{ $labels.persistentvolumeclaim }} space utilization reach {{ $value }}%"
+          - name: flink-deployment-alerts
+            rules:
+              - alert: FlinkDeploymentExceptionalRestarts
+                annotations:
+                  description: "flink deployment {{ $labels.job_name }} has restarted more than 5 times in the last 10 minutes "
+                  summary: "flink deployment {{ $labels.job_name }} stuck in restarting"
+                labels:
+                  severity: P1
+                  namespace: "{{ $labels.namespace }}"
+                expr: "irate(flink_jobmanager_job_numRestarts[5m]) > 0"
+                for: 1s
+          - name: open-api-alerts
+            rules:
+              - alert: Binance BadOpenApiResponse
+                annotations:
+                  description: "Binance 5xx/499 responses rate for open api more than {{ $value | humanizePercentage }} in the last 1 minute"
+                  summary: "Binance too many 5xx/499 response"
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.exported_namespace }}"
+                expr: '100 * sum(rate(nginx_ingress_controller_requests{ingress="binance-ingress",status=~"[5].*|499"}[1m])) by (ingress) > 5'
+                for: 1m
+              - alert: Prod BadOpenApiResponse
+                annotations:
+                  description: "Prod 5xx/499 responses rate for open api more than {{ $value | humanizePercentage }} in the last 1 minute"
+                  summary: "Prod too many 5xx/499 response"
+                labels:
+                  severity: P0
+                  namespace: "{{ $labels.exported_namespace }}"
+                expr: '100 * sum(rate(nginx_ingress_controller_requests{ingress="share-ingress",status=~"[5].*|499"}[1m])) by (ingress) > 5'
+                for: 1m
+              - alert: Binance OpenApiHighTrafficVolume
+                annotations:
+                  description: "bianance high traffic detected for open api in last 1 minute"
+                  summary: "rps > {{ $value }} req/s"
+                labels:
+                  severity: P1
+                  namespace: "{{ $labels.exported_namespace }}"
+                expr: round(sum(irate(nginx_ingress_controller_requests{controller_pod=~".*",controller_class="k8s.io/ingress-nginx",namespace="kube-system", ingress="binance-ingress"}[1m])), 0.001) > 3000
+                for: 1m
+              - alert: Prod OpenApiHighTrafficVolume
+                annotations:
+                  description: "prod high traffic detected for open api in last 1 minute"
+                  summary: "rps > {{ $value }} req/s"
+                labels:
+                  severity: P1
+                  namespace: "{{ $labels.exported_namespace }}"
+                expr: round(sum(irate(nginx_ingress_controller_requests{controller_pod=~".*",controller_class="k8s.io/ingress-nginx",namespace="kube-system", ingress="share-ingress"}[1m])), 0.001) > 200
+                for: 1m
+    alertmanager:
+      ingress:
+        enabled: true
+        annotations:
+          kubernetes.io/ingress.class: nginx
+          cert-manager.io/cluster-issuer: "lets-encrypt"
+        tls:
+          - hosts:
+              - alertmanager.prod.mscoin-data.com
+            secretName: alertmanager-prod-tls
+        hosts:
+          - alertmanager.prod.mscoin-data.com
+      alertmanagerSpec:
+        replicas: 1
+        useExistingSecret: true
+        configSecret: alertmanager-config
+        resources:
+          requests:
+            cpu: 50m
+            memory: 100Mi
+          limits:
+            cpu: 100m
+            memory: 200Mi
+        nodeSelector:
+          nodegroup: "k8s-core"
+          topology.kubernetes.io/zone: "ap-east-1c"
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: gp3
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 2Gi
+    kube-state-metrics:
+      namespaceOverride: kube-system
+      fullnameOverride: kube-prometheus-stack-state-metrics
+      resources:
+        requests:
+          cpu: 50m
+          memory: 50Mi
+        limits:
+          cpu: 100m
+          memory: 100Mi
+      nodeSelector:
+        nodegroup: "k8s-core"
+    prometheusOperator:
+      fullnameOverride: kube-prometheus-operator
+      resources:
+        requests:
+          cpu: 50m
+          memory: 50Mi
+        limits:
+          cpu: 100m
+          memory: 100Mi
+      nodeSelector:
+        nodegroup: "k8s-core"
+    kubelet:
+      serviceMonitor:
+        cAdvisorMetricRelabelings:
+          - sourceLabels: [__name__, node]
+            targetLabel: instance
+            regex: "container_memory_working_set_bytes;(.*)"
+            replacement: $1
+            action: replace
+          - sourceLabels: [__name__]
+            action: drop
+            regex: "container_cpu_(cfs_throttled_seconds_total|load_average_10s|system_seconds_total|user_seconds_total)"
+          - sourceLabels: [__name__]
+            action: drop
+            regex: "container_fs_(io_current|io_time_seconds_total|io_time_weighted_seconds_total|reads_merged_total|sector_reads_total|sector_writes_total|writes_merged_total)"
+          - sourceLabels: [__name__]
+            action: drop
+            regex: "container_memory_(mapped_file|swap)"
+          - sourceLabels: [__name__]
+            action: drop
+            regex: "container_(file_descriptors|tasks_state|threads_max)"
+          - sourceLabels: [__name__]
+            action: drop
+            regex: "container_spec.*"
+          - sourceLabels: [id, pod]
+            action: drop
+            regex: ".+;"
+        metricRelabelings:
+          - sourceLabels: [__name__, node]
+            targetLabel: instance
+            regex: "kubelet_running_pods;(.*)"
+            replacement: $1
+            action: replace
+    prometheus-node-exporter:
+      prometheus:
+        monitor:
+          relabelings:
+            - sourceLabels: [__meta_kubernetes_endpoint_node_name]
+              targetLabel: node
+              regex: ^(.*)$
+              replacement: $1
+              action: replace
+      namespaceOverride: kube-system
+      fullnameOverride: kube-prometheus-stack-node-exporter
+      hostNetwork: true
+      resources:
+        requests:
+          cpu: 10m
+          memory: 100Mi
+        limits:
+          cpu: 50m
+          memory: 200Mi
+    prometheus:
+      serviceAccount:
+        create: false
+        name: tf-service-role-for-thanos
+      thanosService:
+        enabled: true
+      thanosServiceMonitor:
+        enabled: true
+      thanosIngress:
+        enabled: true
+        annotations:
+          kubernetes.io/ingress.class: nginx
+          cert-manager.io/cluster-issuer: "lets-encrypt"
+        tls:
+          - hosts:
+              - thanos.prod.mscoin-data.com
+            secretName: thanos-prod-tls
+        hosts:
+          - thanos.prod.mscoin-data.com
+        paths:
+          - /
+        pathType: ImplementationSpecific
+      ingress:
+        enabled: true
+        annotations:
+          kubernetes.io/ingress.class: nginx
+          cert-manager.io/cluster-issuer: "lets-encrypt"
+        tls:
+          - hosts:
+              - prometheus.prod.mscoin-data.com
+            secretName: prometheus-prod-tls
+        hosts:
+          - prometheus.prod.mscoin-data.com
+      prometheusSpec:
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values:
+                          - prometheus
+                  topologyKey: topology.kubernetes.io/zone
+        replicas: 1
+        thanos:
+          objectStorageConfig:
+            secret:
+              type: s3
+              config:
+                bucket: "mscoin-prod-thanos"
+                endpoint: s3.ap-east-1.amazonaws.com
+                aws_sdk_auth: true
+                region: "ap-east-1"
+        podMonitorSelectorNilUsesHelmValues: false
+        serviceMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: true
+        additionalScrapeConfigs:
+          - job_name: "istiod"
+            kubernetes_sd_configs:
+              - role: endpoints
+                namespaces:
+                  names:
+                    - istio-system
+            relabel_configs:
+              - source_labels:
+                  [
+                    __meta_kubernetes_service_name,
+                    __meta_kubernetes_endpoint_port_name,
+                  ]
+                action: keep
+                regex: istiod;http-monitoring
+          - job_name: "envoy-stats"
+            metrics_path: /stats/prometheus
+            kubernetes_sd_configs:
+              - role: pod
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_container_port_name]
+                action: keep
+                regex: ".*-envoy-prom"
+        resources:
+          requests:
+            cpu: 1700m
+            memory: 14Gi
+          limits:
+            cpu: 1700m
+            memory: 14Gi
+        nodeSelector:
+          nodegroup: "k8s-prometheus"
+        retention: 3d
+        hostNetwork: true
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: gp2
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 100Gi
+    grafana:
+      extraSecretMounts:
+        - name: grafana-generic-oauth
+          secretName: grafana-oidc-creds
+          defaultMode: 0440
+          mountPath: /etc/secrets/auth_generic_oauth
+          readOnly: true
+      grafana.ini:
+        server:
+          root_url: https://grafana.mscoinsso.xyz
+        auth.generic_oauth:
+          enabled: true
+          allow_sign_up: true
+          name: keycloak-oidc-auth
+          client_id: $__file{/etc/secrets/auth_generic_oauth/client_id}
+          client_secret: $__file{/etc/secrets/auth_generic_oauth/client_secret}
+          scopes: openid email profile offline_access roles
+          email_attribute_path: email
+          login_attribute_path: username
+          name_attribute_path: full_name
+          auth_url: https://keycloak-admin.mscoinauth.xyz/realms/master/protocol/openid-connect/auth
+          token_url: https://keycloak-admin.mscoinauth.xyz/realms/master/protocol/openid-connect/token
+          api_url: https://keycloak-admin.mscoinauth.xyz/realms/master/protocol/openid-connect/userinfo
+          role_attribute_path: contains(roles[*], 'admin') && 'Admin' || contains(roles[*], 'viewer') && 'Editor' || 'Viewer'
+      deploymentStrategy:
+        type: Recreate
+      serviceAccount:
+        create: false
+        name: tf-service-role-for-grafana-ds
+      additionalDataSources:
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://loki-gateway:80/
+          jsonData:
+            timeout: 60
+            maxLines: 1000
+      adminPassword: admin
+      resources:
+        requests:
+          cpu: 500m
+          memory: 500Mi
+        limits:
+          cpu: 1000m
+          memory: 1000Mi
+      nodeSelector:
+        nodegroup: "k8s-core"
+      ingress:
+        enabled: true
+        annotations:
+          kubernetes.io/ingress.class: nginx
+          cert-manager.io/cluster-issuer: "lets-encrypt-cloudflare"
+        tls:
+          - hosts:
+              - grafana.mscoinsso.xyz
+            secretName: grafana-cloudflare-tls
+        hosts:
+          - grafana.mscoinsso.xyz
+      persistence:
+        type: pvc
+        enabled: true
+        storageClassName: gp2
+        accessModes:
+          - ReadWriteOnce
+        size: 10Gi
+        finalizers:
+          - kubernetes.io/pvc-protection
+    thanosRuler:
+      enabled: true
+      ingress:
+        enabled: true
+        annotations:
+          kubernetes.io/ingress.class: nginx
+          cert-manager.io/cluster-issuer: "lets-encrypt"
+        tls:
+          - hosts:
+              - thanos-ruler.prod.mscoin-data.com
+            secretName: grafana-prod-tls
+        hosts:
+          - thanos-ruler.prod.mscoin-data.com
+        paths:
+          - /
+        pathType: ImplementationSpecific
+      thanosRulerSpec:
+        ruleSelectorNilUsesHelmValues: false
+        alertmanagersConfig:
+          secret:
+            alertmanagers:
+              - api_version: v2
+                static_configs:
+                  - dnssrv+_http-web._tcp.alertmanager-operated:9093
+        queryEndpoints:
+          - dnssrv+_http._tcp.thanos-query.monitoring.svc.cluster.local
+        resources:
+          requests:
+            cpu: 30m
+            memory: 200Mi
+          limits:
+            cpu: 50m
+            memory: 400Mi
+        nodeSelector:
+          nodegroup: "k8s-core"
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: gp2
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 20Gi
+        objectStorageConfig:
+          secret:
+            type: s3
+            config:
+              bucket: "mscoin-prod-thanos"
+              endpoint: s3.ap-east-1.amazonaws.com
+              aws_sdk_auth: true
+              region: "ap-east-1"
+      serviceAccount:
+        create: false
+        name: tf-service-role-for-thanos
